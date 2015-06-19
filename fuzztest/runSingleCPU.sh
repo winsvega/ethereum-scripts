@@ -18,6 +18,7 @@ TEST_SUITE=""
 TEST_FILE=""
 TEST_SUITE_PREFIX=""
 TEST_DEBUG=0
+TEST_DEBUG_OPTION=""
 for i in "$@"
 do
 case $i in
@@ -35,6 +36,11 @@ case $i in
     ;;
     --debug)
     TEST_DEBUG=1
+    TEST_DEBUG_OPTION="--debug"
+    shift # past argument with no value
+    ;;
+    --filldebug)
+    TEST_FDEBUG_OPTION="--filldebug"
     shift # past argument with no value
     ;;
     --python)
@@ -51,13 +57,14 @@ case $i in
     shift # past argument with no value
     ;;
     --help)
-    echo "Fuzzing Test Script"
+    echo "Fuzzing Test Script for cpp-ethereum/build/test/fuzzTesting/createRandomTest"
     echo "Before you run make sure to set path variables in the 'options' section in the header of this script"
     echo "Usage:"
     echo "  -t <TestSuite>	- Define the test suite. Default suite is StateTests"
     echo "			(StateTests, TransactionTests, VMTests, BlockChainTests)"
     echo "  -file <PathToFile>	- Run test on a single file"
     echo "  --debug		- Output clients std::out and errors to the console"
+    echo "  --filldebug		- Output test generation std::out"
     echo "  --python		- Add python client to the test simulation"
     echo "  --cpp			- Add cpp-jit client to the test simulation"
     echo "  --go			- Add go client to the test simulation"
@@ -98,15 +105,22 @@ TOTAL_FILLING_FAILS=0
 while [ 1 ]
 do	
 	if [[ $TEST_FILE == "" ]]; then
-		TEST="$($CPP_ETHEREUM_PATH/build/test/fuzzTesting/createRandomTest -t $TEST_SUITE --fulloutput)"
+		TEST="$($CPP_ETHEREUM_PATH/build/test/fuzzTesting/createRandomTest -t $TEST_SUITE --fulloutput $TEST_FDEBUG_OPTION)"
 	else
 		TEST=$(cat $TEST_FILE)
 	fi
-	
+
+	#test size limit to ~60 kbyte
 	if [[ ${#TEST} -ge 60000 ]]; then
 		echo "Test size too long!" 
 		continue;
 	fi  
+
+	#exit because createRandomTest return might be corrupted by debug messages
+	if [ "$TEST_FDEBUG_OPTION" == "--filldebug" ]; then
+		echo "$TEST"
+		exit;
+	fi
 	
 	FILL_WRONG=1
 	if [[ $TEST == *"post"* ]]; then
@@ -137,6 +151,9 @@ do
 		 ("VMTests")
 			OUTPUT_PYTHON="$(python $PY_ETHEREUM_PATH/ethereum/tests/test_vm.py "$TEST" )"
 		;;
+		 ("BlockChainTests")
+			OUTPUT_PYTHON="$(python $PY_ETHEREUM_PATH/ethereum/tests/test_blockchain.py "$TEST" )"
+		;;
 		esac
 		 RESULT_PYTHON=$?
 		 if [ $TEST_DEBUG -eq 1 ]; then
@@ -146,20 +163,19 @@ do
 
 		# test go
 		RESULT_GO=0
-		if [ $TEST_GO -eq 1 ] && [ "$TEST_SUITE" == "StateTests" ]; 
-		then
-		 OUTPUT_GO="$($GO_ETHEREUM_PATH/bin/ethtest "$TEST" 2> /dev/null)"
-		 RESULT_GO=$?
-		 if [ $TEST_DEBUG -eq 1 ]; then
-			echo $OUTPUT_GO
-		 fi
-		fi 
+		if [ $TEST_GO -eq 1 ]; then
+			OUTPUT_GO="$( echo $TEST | $GO_ETHEREUM_PATH/bin/ethtest --test $TEST_SUITE --stdin )"
+			RESULT_GO=$?
+			if [ $TEST_DEBUG -eq 1 ]; then
+				echo $OUTPUT_GO
+			fi
+		fi
 
 		# test cpp-jit
 		RESULT_CPPJIT=0
 		if [ $TEST_CPP -eq 1 ];
 		then
-		 OUTPUT_CPPJIT="$($CPP_ETHEREUM_PATH/build/test/fuzzTesting/createRandomTest -t $TEST_SUITE -checktest "$TEST")"
+		 OUTPUT_CPPJIT="$($CPP_ETHEREUM_PATH/build/test/fuzzTesting/createRandomTest -t $TEST_SUITE $TEST_DEBUG_OPTION -checktest "$TEST")"
 		 RESULT_CPPJIT=$?
 		 if [ $TEST_DEBUG -eq 1 ]; then
 			echo $OUTPUT_CPPJIT
