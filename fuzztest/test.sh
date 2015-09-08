@@ -2,7 +2,7 @@
 
 #Options
 PY_ETHEREUM_PATH="/home/wins/Ethereum/pyethereum"
-CPP_ETHEREUM_PATH="/home/wins/Ethereum/cpp-ethereum"
+CPP_ETHEREUM_PATH="/home/wins/Ethereum/cpp-ethereum/build"
 GO_ETHEREUM_PATH="/home/wins/Ethereum/go-ethereum"
 LOG_DIR="/home/wins/Ethereum/ethereum-scripts/fuzztest"
 LOG_ENABLE=1 #enables output to the file
@@ -16,6 +16,7 @@ TEST_GO=0
 TEST_CPP=0
 TEST_SUITE=""
 TEST_FILE=""
+TEST_FILL=""
 TEST_SUITE_PREFIX=""
 TEST_DEBUG=0
 TEST_DEBUG_OPTION=""
@@ -34,6 +35,14 @@ case $i in
     TEST_FILE=${!i}
     shift 
     ;;
+    -filltest)
+    shift
+    ((i++))
+    TEST_FILL=${!i}
+    TMP=$(cat $TEST_FILL)
+    TEST_FILL="-filltest "$TMP""
+    shift 
+    ;;
     --debug)
     TEST_DEBUG=1
     TEST_DEBUG_OPTION="--debug"
@@ -45,7 +54,7 @@ case $i in
     ;;
     --python)
     TEST_PYTHON=1
-    cd $PY_ETHEREUM_PATH #(python has local dependencies so only works from within the directory)
+    #cd $PY_ETHEREUM_PATH #(python has local dependencies so only works from within the directory)
     shift # past argument with no value
     ;;
     --cpp)
@@ -63,6 +72,7 @@ case $i in
     echo "  -t <TestSuite>	- Define the test suite. Default suite is StateTests"
     echo "			(StateTests, TransactionTests, VMTests, BlockChainTests)"
     echo "  -file <PathToFile>	- Run test on a single file"
+    echo "  -filltest <PathToFile> - Try to fill test filler"
     echo "  --debug		- Output clients std::out and errors to the console"
     echo "  --filldebug		- Output test generation std::out"
     echo "  --python		- Add python client to the test simulation"
@@ -88,7 +98,7 @@ then
 	TEST_CPP=1
 fi
 
-if [ "$TEST_SUITE" != "StateTests" ] && [ "$TEST_SUITE" != "TransactionTests" ] && [ "$TEST_SUITE" != "VMTests" ] && [ "$TEST_SUITE" != "BlockChainTests" ]; then
+if [ "$TEST_SUITE" != "RLPTests" ] && [ "$TEST_SUITE" != "StateTests" ] && [ "$TEST_SUITE" != "TransactionTests" ] && [ "$TEST_SUITE" != "VMTests" ] && [ "$TEST_SUITE" != "BlockChainTests" ]; then
 	if [ "$TEST_SUITE" != "" ]; then
 		echo "Test suite not supported!"
 	fi
@@ -105,7 +115,7 @@ TOTAL_FILLING_FAILS=0
 while [ 1 ]
 do	
 	if [[ $TEST_FILE == "" ]]; then
-		TEST="$($CPP_ETHEREUM_PATH/build/test/fuzzTesting/createRandomTest -t $TEST_SUITE --fulloutput $TEST_FDEBUG_OPTION)"
+		TEST="$($CPP_ETHEREUM_PATH/test/testeth --createRandomTest -t $TEST_SUITE --fulloutput $TEST_FDEBUG_OPTION $TEST_FILL)"
 	else
 		TEST=$(cat $TEST_FILE)
 	fi
@@ -133,12 +143,17 @@ do
 		FILL_WRONG=0
 	fi
 
+	if [[ $TEST == *"out"* ]] && [ "$TEST_SUITE" == "RLPTests" ]; then
+		FILL_WRONG=0
+	fi
+
 	if [ "$TEST_SUITE" == "VMTests" ]; then #VMTest always correct filling 
  		FILL_WRONG=0 
 	fi  
 
 	if [ $FILL_WRONG == 0 ]; then
 		# test pyethereum
+		cd $PY_ETHEREUM_PATH
 		RESULT_PYTHON=0
 		if [ $TEST_PYTHON -eq 1 ]; then
 		case "$TEST_SUITE" in
@@ -164,7 +179,11 @@ do
 		# test go
 		RESULT_GO=0
 		if [ $TEST_GO -eq 1 ]; then
-			OUTPUT_GO="$( echo $TEST | $GO_ETHEREUM_PATH/bin/ethtest --test $TEST_SUITE --stdin )"
+			if [ "$TEST_SUITE" == "BlockChainTests" ]; then
+				OUTPUT_GO="$( echo $TEST | $GO_ETHEREUM_PATH/bin/ethtest --test BlockTests --stdin )"
+			else
+				OUTPUT_GO="$( echo $TEST | $GO_ETHEREUM_PATH/bin/ethtest --test $TEST_SUITE --stdin )"
+			fi
 			RESULT_GO=$?
 			if [ $TEST_DEBUG -eq 1 ]; then
 				echo $OUTPUT_GO
@@ -175,7 +194,7 @@ do
 		RESULT_CPPJIT=0
 		if [ $TEST_CPP -eq 1 ];
 		then
-		 OUTPUT_CPPJIT="$($CPP_ETHEREUM_PATH/build/test/fuzzTesting/createRandomTest -t $TEST_SUITE $TEST_DEBUG_OPTION -checktest "$TEST")"
+		 OUTPUT_CPPJIT="$($CPP_ETHEREUM_PATH/test/testeth -verbosity 2 --createRandomTest -t $TEST_SUITE $TEST_DEBUG_OPTION -checktest "$TEST")"
 		 RESULT_CPPJIT=$?
 		 if [ $TEST_DEBUG -eq 1 ]; then
 			echo $OUTPUT_CPPJIT
@@ -237,7 +256,7 @@ do
 		fi
 	fi
 
-	if [[ $TEST_FILE != "" ]]; then
+	if [[ $TEST_FILE != "" ]] || [[ $TEST_FILL != "" ]]; then
 		break;
 	fi	
 done
